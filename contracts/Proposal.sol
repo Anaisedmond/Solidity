@@ -2,7 +2,12 @@
 pragma solidity ^0.8.18;
 
 contract ProposalContract {
-    uint256 private counter; // This line is added
+    // ****************** Data ***********************
+
+    // Owner
+    address owner;
+
+    uint256 private counter;
 
     struct Proposal {
         string title; // Title of the proposal
@@ -17,7 +22,36 @@ contract ProposalContract {
 
     mapping(uint256 => Proposal) proposal_history; // Recordings of previous proposals
 
-    function create(string calldata _title, string calldata _description, uint256 _total_vote_to_end) external {
+    address[] private voted_addresses;
+
+    // Constructor
+    constructor() {
+        owner = msg.sender;
+        voted_addresses.push(msg.sender);
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can call this function");
+        _;
+    }
+
+    modifier active() {
+        require(proposal_history[counter].is_active == true, "Proposal is not active");
+        _;
+    }
+
+    modifier newVoter(address _address) {
+        require(!isVoted(_address), "Address has already voted");
+        _;
+    }
+
+    // ****************** Execute Functions ***********************
+
+    function setOwner(address new_owner) external onlyOwner {
+        owner = new_owner;
+    }
+
+    function create(string calldata _title, string calldata _description, uint256 _total_vote_to_end) external onlyOwner {
         counter += 1;
         proposal_history[counter] = Proposal({
             title: _title,
@@ -29,5 +63,57 @@ contract ProposalContract {
             current_state: false,
             is_active: true
         });
+    }
+
+    function vote(uint8 choice) external active newVoter(msg.sender) {
+        Proposal storage proposal = proposal_history[counter];
+        uint256 total_vote = proposal.approve + proposal.reject + proposal.pass;
+
+        voted_addresses.push(msg.sender);
+
+        if (choice == 1) {
+            proposal.approve += 1;
+        } else if (choice == 2) {
+            proposal.reject += 1;
+        } else if (choice == 0) {
+            proposal.pass += 1;
+        }
+
+        proposal.current_state = calculateCurrentState();
+
+        if ((proposal.total_vote_to_end - total_vote == 1) && (choice == 1 || choice == 2 || choice == 0)) {
+            proposal.is_active = false;
+            voted_addresses = [owner];
+        }
+    }
+
+    function calculateCurrentState() private view returns(bool) {
+        Proposal storage proposal = proposal_history[counter];
+
+        uint256 totalVotes = proposal.approve + proposal.reject + proposal.pass;
+
+        if (totalVotes == 0) {
+            return false;
+        }
+
+        uint256 approvePercentage = (proposal.approve * 100) / totalVotes;
+        uint256 rejectPercentage = (proposal.reject * 100) / totalVotes;
+
+        if (approvePercentage > 60) {
+            return true;
+        } else if (rejectPercentage > 40) {
+            return false;
+        }
+
+        return proposal.current_state;
+    }
+
+    function isVoted(address _address) private view returns (bool) {
+        for (uint i = 0; i < voted_addresses.length; i++) {
+            if (voted_addresses[i] == _address) {
+                return true;
+            }
+        }
+        return false;
     }
 }
